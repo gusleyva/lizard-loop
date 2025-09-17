@@ -361,11 +361,6 @@
             playLizardSound();
             createAnimatedLizard();
             
-            // Add extra lizards for milestone clicks
-            if (clickCount % 10 === 0) {
-                setTimeout(() => createAnimatedLizard(), 200);
-                setTimeout(() => createAnimatedLizard(), 400);
-            }
         });
 
         // Initialize on page load
