@@ -1,0 +1,48 @@
+{
+  "name": "lizard-loop",
+  "version": "1.0.0",
+  "description": "Lizard Loop - Simple High Performance Global Counter",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "start:redis": "node backend/server-redis.js",
+    "start:memcached": "node backend/server-memcached.js",
+    "dev": "nodemon backend/server.js",
+    "dev:redis": "nodemon backend/server-redis.js",
+    "dev:memcached": "nodemon backend/server-memcached.js",
+    "test:race": "node tests/performance/test-race-condition.js",
+    "test:load": "node tests/performance/test-load-performance.js",
+    "test:redis": "node tests/performance/test-redis-performance.js",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.6",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4",
+    "axios": "^1.6.0"
+  },
+  "optionalDependencies": {
+    "ioredis": "^5.3.0",
+    "memcached": "^2.2.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "lizard",
+    "clicker",
+    "counter",
+    "pwa",
+    "express",
+    "sqlite",
+    "redis"
+  ],
+  "author": "TL",
+  "license": "MIT"
+}

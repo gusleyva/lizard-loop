@@ -3,7 +3,7 @@ const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/lizard.wav'
+  '/assets/lizard.wav'
 ];
 
 // Install event - cache resources
@@ -19,7 +19,7 @@ self.addEventListener('install', (event) => {
         // Cache only the essential files if some fail
         return caches.open(CACHE_NAME)
           .then((cache) => {
-            return cache.addAll(['/', '/index.html', '/manifest.json']);
+            return cache.addAll(['/', '/index.html', '/manifest.json', '/assets/lizard.wav']);
           });
       })
   );
@@ -27,6 +27,16 @@ self.addEventListener('install', (event) => {
 
 // Fetch event - serve from cache when offline
 self.addEventListener('fetch', (event) => {
+  // Skip caching for:
+  // 1. POST requests (can't be cached)
+  // 2. External URLs (like hitscounter.dev)
+  // 3. API calls (should always be fresh)
+  if (event.request.method !== 'GET' || 
+      !event.request.url.startsWith(self.location.origin) ||
+      event.request.url.includes('/api/')) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
