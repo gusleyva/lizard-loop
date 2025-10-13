@@ -70,20 +70,38 @@
             filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
         }
 
-        .counter {
+        .counters-container {
             position: fixed;
             top: 50px;
-            right: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            z-index: 100;
+        }
+
+        .counter {
             color: #333;
-            font-size: 1.2em;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 10px 20px;
-            border-radius: 25px;
+            font-size: 1.1em;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px 24px;
+            border-radius: 30px;
             border: 1px solid rgba(0, 0, 0, 0.1);
             font-weight: 600;
             backdrop-filter: blur(10px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            white-space: nowrap;
+        }
+
+        .counter-label {
+            opacity: 0.7;
+            font-size: 0.9em;
+        }
+
+        .counter-value {
+            font-size: 1.2em;
+            margin-left: 8px;
+            font-weight: 700;
         }
 
         .hits-badge {
@@ -207,11 +225,19 @@
                 font-size: 60px;
             }
             
-            .counter {
-                font-size: 1em;
-                padding: 8px 15px;
+            .counters-container {
                 top: 45px;
-                right: 15px;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .counter {
+                font-size: 0.9em;
+                padding: 10px 18px;
+            }
+
+            .counter-value {
+                font-size: 1.1em;
             }
 
             .hits-badge {
@@ -237,7 +263,17 @@
     </div>
     
     <img class="hits-badge" alt="hits" src="https://hitscounter.dev/api/hit?url=https%3A%2F%2Flizard-loop.vercel.app%2F&label=&icon=align-center&color=%23fff&message=&style=flat&tz=Mexico%2FGeneral">
-    <div class="counter" id="clickCounter">Clicks: 0</div>
+    
+    <div class="counters-container">
+        <div class="counter" id="myClickCounter">
+            <span class="counter-label">My Clicks:</span>
+            <span class="counter-value" id="myClickValue">0</span>
+        </div>
+        <div class="counter" id="globalClickCounter">
+            <span class="counter-label">All Clicks:</span>
+            <span class="counter-value" id="globalClickValue">0</span>
+        </div>
+    </div>
     
     <div class="footer">
         <div>Original idea from → <a href="https://aschmelyun.com/" target="_blank" rel="noopener noreferrer">Andrew Schmelyun</a></div>
@@ -247,27 +283,80 @@
 
     <script>
         const button = document.getElementById('lizardButton');
-        const counter = document.getElementById('clickCounter');
+        const myClickValue = document.getElementById('myClickValue');
+        const globalClickValue = document.getElementById('globalClickValue');
         const clickEffect = document.getElementById('clickEffect');
         
-        let clickCount = 0;
+        let myClickCount = 0;
+        let globalCount = 0;
+        let globalUpdateInterval = null;
 
-        // Load click count from localStorage
-        function loadClickCount() {
-            const saved = localStorage.getItem('lizardClickCount');
-            clickCount = saved ? parseInt(saved, 10) : 0;
-            updateCounterDisplay();
+        // Load global count from API
+        async function loadGlobalCount() {
+            try {
+                const response = await fetch('/api/clicks');
+                const data = await response.json();
+                globalCount = data.count;
+                updateGlobalDisplay();
+            } catch (error) {
+                console.log('Failed to load global count');
+            }
         }
 
-        // Save click count to localStorage
-        function saveClickCount() {
-            localStorage.setItem('lizardClickCount', clickCount.toString());
+        // Load personal click count from localStorage
+        function loadMyClickCount() {
+            const saved = localStorage.getItem('myLizardClicks');
+            myClickCount = saved ? parseInt(saved, 10) : 0;
+            updateMyClickDisplay();
         }
 
-        // Update the counter display with formatting
-        function updateCounterDisplay() {
+        // Save click to API and update personal counter
+        async function saveClickCount() {
+            // Increment personal counter immediately
+            myClickCount++;
+            localStorage.setItem('myLizardClicks', myClickCount.toString());
+            updateMyClickDisplay();
+
+            // Send to API and update global counter immediately
+            try {
+                const response = await fetch('/api/clicks', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                globalCount = data.count;
+                updateGlobalDisplay();
+            } catch (error) {
+                console.log('API save failed');
+                // If API fails, at least increment global counter locally
+                globalCount++;
+                updateGlobalDisplay();
+            }
+        }
+
+        // Update personal counter display
+        function updateMyClickDisplay() {
             const formatter = new Intl.NumberFormat('en-US');
-            counter.textContent = `Clicks: ${formatter.format(clickCount)}`;
+            myClickValue.textContent = formatter.format(myClickCount);
+        }
+
+        // Update global counter display
+        function updateGlobalDisplay() {
+            const formatter = new Intl.NumberFormat('en-US');
+            globalClickValue.textContent = formatter.format(globalCount);
+        }
+
+        // Start polling for global count updates
+        function startGlobalCountPolling() {
+            // Update immediately
+            loadGlobalCount();
+            
+            // Then update every 10 seconds
+            globalUpdateInterval = setInterval(() => {
+                loadGlobalCount();
+            }, 10000);
         }
 
         // Create animated lizard that bounces around
@@ -299,7 +388,7 @@
         }
 
         // Audio setup for lizard.wav
-        const audio = new Audio('lizard.wav');
+        const audio = new Audio('assets/lizard.wav');
         audio.preload = 'auto';
 
         // Play lizard sound
@@ -350,26 +439,34 @@
         }
 
         // Handle button click
-        button.addEventListener('click', () => {
-            // Increment counter
-            clickCount++;
-            updateCounterDisplay();
-            saveClickCount();
-            
-            // Visual and audio effects
+        button.addEventListener('click', async () => {
+            // Visual and audio effects first for immediate feedback
             triggerClickEffect();
             playLizardSound();
             createAnimatedLizard();
             
+            // Save to API (async)
+            await saveClickCount();
         });
 
         // Initialize on page load
-        window.addEventListener('load', () => {
-            loadClickCount();
+        window.addEventListener('load', async () => {
+            // Load personal clicks from localStorage
+            loadMyClickCount();
+            
+            // Start polling for global count
+            startGlobalCountPolling();
             
             // Welcome animation
-            if (clickCount === 0) {
+            if (myClickCount === 0 && globalCount === 0) {
                 setTimeout(() => createAnimatedLizard(), 500);
+            }
+        });
+
+        // Clean up interval on page unload
+        window.addEventListener('beforeunload', () => {
+            if (globalUpdateInterval) {
+                clearInterval(globalUpdateInterval);
             }
         });
 
