@@ -56,14 +56,29 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https://hitscounter.dev"],
+      // connectSrc: ["'self'", "https://hitscounter.dev"],
+      connectSrc: ["'self'"],  // CAMBIO: Quitamos hitscounter.dev temporalmente
       fontSrc: ["'self'"],
       objectSrc: ["'none'"],
-      mediaSrc: ["'self'"],
+      mediaSrc: ["'self'", "blob:"],
       frameSrc: ["'none'"],
     },
   },
+  crossOriginOpenerPolicy: false,  // NUEVO: Desactivamos COOP
+  crossOriginResourcePolicy: false,  // NUEVO: Desactivamos CORP
+  hsts: false,
 }));
+
+/*
+O más simple, reemplaza TODO el bloque de Helmet con esto:
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginOpenerPolicy: false,
+  crossOriginResourcePolicy: false,
+  hsts: false,
+}));
+*/
+
 app.use(compression());
 app.use(cors());
 app.use(express.json());
