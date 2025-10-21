@@ -4,45 +4,20 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const path = require('path');
-// const Redis = require('ioredis'); // Redis implementation (commented)
-// const Memcached = require('memcached'); // Memcached implementation (commented)
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// ============================================================================
-// CACHE IMPLEMENTATIONS (Choose one)
-// ============================================================================
 
 // 1. NODE.JS MAP (Current Implementation - Fastest & Simplest)
 const counter = new Map();
 counter.set('lizard:count', 0);
 
-// 2. REDIS IMPLEMENTATION (Commented - for future use)
-/*
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  retryDelayOnFailover: 100,
-  maxRetriesPerRequest: 3,
-  lazyConnect: true
-});
-*/
-
-// 3. MEMCACHED IMPLEMENTATION (Commented - for future use)
-/*
-const memcached = new Memcached('localhost:11211');
-
-function incrementCountMemcached() {
-  return new Promise((resolve, reject) => {
-    memcached.incr('lizard:count', 1, (err, result) => {
-      if (err) reject(err);
-      else resolve(result);
-    });
-  });
-}
-*/
+// 🔒 BATCH WRITES: Evita SQLite lock contention
+let pendingWrites = [];
+const BATCH_SIZE = 10;
+const BATCH_TIMEOUT = 5000; // 5 segundos
+let batchTimer = null;
 
 // Current cache status
 let isCacheAvailable = true; // Always true for Map implementation
@@ -81,8 +56,30 @@ app.use(helmet({
 
 app.use(compression());
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1kb' })); // 🔒 Limita JSON payload
 app.use(express.static(path.join(__dirname, '../public')));
+
+// rate limiting en Express (backup de Cloudflare)
+const clickLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minuto
+  max: 200, // 3 clicks/sec, 200 clicks/minuto por IP
+  message: { error: 'Too many clicks, slow down! 🦎' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Usa X-Forwarded-For de Cloudflare/Nginx
+  skip: (req) => {
+    // Skip rate limit para health checks
+    return req.path === '/api/health';
+  }
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120, // 120 requests/minuto para otras APIs
+  message: { error: 'Too many requests' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // SQLite database
 const db = new sqlite3.Database('./clicks.db', (err) => {
@@ -126,19 +123,6 @@ async function loadInitialCount() {
       // Initialize with Map (current implementation)
       counter.set('lizard:count', initialCount);
       console.log(`🗺️ Map cache initialized with count: ${initialCount}`);
-      
-      // REDIS IMPLEMENTATION (Commented - for future use)
-      /*
-      try {
-        await redis.set('lizard:count', initialCount);
-        isRedisAvailable = true;
-        console.log(`🔴 Redis initialized with count: ${initialCount}`);
-      } catch (redisErr) {
-        console.log('⚠️ Redis not available, using fallback counter');
-        fallbackCounter = initialCount;
-        isRedisAvailable = false;
-      }
-      */
     });
   } catch (error) {
     console.error('Error in loadInitialCount:', error.message);
@@ -149,30 +133,6 @@ async function loadInitialCount() {
 async function getCurrentCount() {
   // MAP IMPLEMENTATION (Current)
   return counter.get('lizard:count') || 0;
-  
-  // REDIS IMPLEMENTATION (Commented - for future use)
-  /*
-  if (isRedisAvailable) {
-    try {
-      const count = await redis.get('lizard:count');
-      return parseInt(count) || 0;
-    } catch (error) {
-      isRedisAvailable = false;
-      return fallbackCounter;
-    }
-  }
-  return fallbackCounter;
-  */
-  
-  // MEMCACHED IMPLEMENTATION (Commented - for future use)
-  /*
-  return new Promise((resolve, reject) => {
-    memcached.get('lizard:count', (err, result) => {
-      if (err) reject(err);
-      else resolve(parseInt(result) || 0);
-    });
-  });
-  */
 }
 
 // Increment count
@@ -180,6 +140,45 @@ async function incrementCount() {
   const current = counter.get('lizard:count') || 0;
   counter.set('lizard:count', current + 1);
   return current + 1;
+}
+
+// 🔒 BATCH WRITE: Agrupa writes para evitar lock contention
+function addToBatch(count) {
+  pendingWrites.push(count);
+  
+  // Si alcanzamos el batch size, escribir inmediatamente
+  if (pendingWrites.length >= BATCH_SIZE) {
+    clearTimeout(batchTimer);
+    batchTimer = null;
+    flushBatch();
+  } 
+  // Si no, programar flush después del timeout
+  else if (!batchTimer) {
+    batchTimer = setTimeout(flushBatch, BATCH_TIMEOUT);
+  }
+}
+
+function flushBatch() {
+  if (pendingWrites.length === 0) return;
+  
+  const batch = [...pendingWrites];
+  pendingWrites = [];
+  
+  // Insertar todos los valores en una sola query
+  const placeholders = batch.map(() => '(?)').join(',');
+  const sql = `INSERT INTO clicks (count) VALUES ${placeholders}`;
+  
+  db.run(sql, batch, (err) => {
+    if (err) {
+      console.error('❌ Batch write error:', err.message);
+      // En caso de error, reintentar individualmente
+      batch.forEach(count => {
+        db.run('INSERT INTO clicks (count) VALUES (?)', [count]);
+      });
+    } else {
+      console.log(`📊 Batch wrote ${batch.length} records to database`);
+    }
+  });
 }
 
 // Sync to database
@@ -198,8 +197,11 @@ async function syncToDatabase() {
   }
 }
 
-// API Routes
-app.get('/api/clicks', async (req, res) => {
+// ============================================================================
+// API ROUTES
+// ============================================================================
+
+app.get('/api/clicks', apiLimiter, async (req, res) => {
   try {
     const count = await getCurrentCount();
     res.json({ 
@@ -212,13 +214,19 @@ app.get('/api/clicks', async (req, res) => {
   }
 });
 
-app.post('/api/clicks', async (req, res) => {
-  // Falta rate limiting
-  // Falta validación del cuerpo
+app.post('/api/clicks', clickLimiter, async (req, res) => {
   // Falta protección anti-spam
   try {
+    // 🔒 Body validation: Body is not expected
+    if (req.body && Object.keys(req.body).length > 0) {
+      return res.status(400).json({ error: 'No body expected' });
+    }
+
     const newCount = await incrementCount();
-    setImmediate(() => syncToDatabase());
+
+    // 🔒 Batch write en lugar de write inmediato
+    addToBatch(newCount);
+    // setImmediate(() => syncToDatabase());
     
     res.json({ 
       count: newCount,
@@ -226,11 +234,12 @@ app.post('/api/clicks', async (req, res) => {
       source: cacheType
     });
   } catch (error) {
+    console.error('❌ POST /api/clicks error:', error);
     res.status(500).json({ error: 'Failed to increment count' });
   }
 });
 
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', apiLimiter, async (req, res) => {
   try {
     const currentCount = await getCurrentCount();
     
@@ -243,6 +252,7 @@ app.get('/api/stats', async (req, res) => {
       FROM clicks
     `, (err, row) => {
       if (err) {
+        console.error('❌ Stats query error:', err);
         res.status(500).json({ error: 'Database error' });
       } else {
         res.json({
@@ -254,6 +264,7 @@ app.get('/api/stats', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('❌ GET /api/stats error:', error);
     res.status(500).json({ error: 'Failed to get stats' });
   }
 });
@@ -271,6 +282,7 @@ app.get('/api/health', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
+    console.error('❌ Health check error:', error);
     res.status(500).json({ error: 'Health check failed' });
   }
 });
@@ -280,15 +292,24 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Start server
+// ============================================================================
+// SERVER START
+// ============================================================================
+
 app.listen(PORT, () => {
   console.log(`🦎 Lizard Loop server running on port ${PORT}`);
   console.log(`🗺️ Cache: ${cacheType.toUpperCase()} (${isCacheAvailable ? 'ENABLED' : 'DISABLED'})`);
   console.log(`📊 Current count: ${counter.get('lizard:count') || 0}`);
+  console.log(`🔒 Rate limiting: ENABLED`);
+  console.log(`📦 Batch writes: ENABLED (size: ${BATCH_SIZE})`);
   console.log(`📱 App: http://localhost:${PORT}`);
 });
 
-// Graceful shutdown
+// ============================================================================
+// GRACEFUL SHUTDOWN
+// ============================================================================
+
+
 process.on('SIGINT', async () => {
   console.log('\n🔄 Final database sync...');
   try {
