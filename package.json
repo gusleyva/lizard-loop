@@ -44,6 +44,6 @@
     "sqlite",
     "redis"
   ],
-  "author": "TL",
+  "author": "Gustavo Leyva",
   "license": "MIT"
 }

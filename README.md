@@ -212,9 +212,9 @@ MIT License
 
 ## 🙏 Credits
 
+- **Implementation**: [Gustavo Leyva](https://website-swe-gusleyva.vercel.app/)
 - **Original Idea**: [Andrew Schmelyun](https://aschmelyun.com/)
 - **Inspiration**: [lizard.click](https://lizard.click/)
-- **Implementation**: TL
 
 ---
 
