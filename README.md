@@ -213,6 +213,7 @@ MIT License
 ## 🙏 Credits
 
 - **Implementation**: [Gustavo Leyva](https://website-swe-gusleyva.vercel.app/)
+- **Historia**: [Artículo en substack](https://open.substack.com/pub/ovatleyva/p/proyecto-lizard-fullstack-devops?r=2efh6v&utm_campaign=post&utm_medium=web)
 - **Original Idea**: [Andrew Schmelyun](https://aschmelyun.com/)
 - **Inspiration**: [lizard.click](https://lizard.click/)
 
